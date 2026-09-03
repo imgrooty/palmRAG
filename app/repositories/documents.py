@@ -121,23 +121,5 @@ class DocumentRepository:
         await db["chunks"].insert_many(docs, ordered=False)
         return docs
 
-    async def get_chunks_by_document_id(
-        self, db: AsyncIOMotorDatabase, document_id: uuid.UUID
-    ) -> list[dict[str, Any]]:
-        """Retrieve all chunks for a document, ordered by chunk_index.
-
-        Args:
-            db: Motor database instance.
-            document_id: Parent document _id.
-
-        Returns:
-            List of chunk dicts.
-        """
-        cursor = db["chunks"].find(
-            {"document_id": document_id},
-            sort=[("chunk_index", 1)],
-        )
-        return await cursor.to_list(length=None)
-
 
 document_repository = DocumentRepository()

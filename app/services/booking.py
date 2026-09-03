@@ -30,7 +30,16 @@ class BookingService:
             history=history,
         )
 
-        if not extracted.has_booking_intent and not partial_state:
+        # Check if the user provided new booking fields that weren't in the partial state
+        provided_new_info = False
+        for field in ["name", "email", "date", "time"]:
+            extracted_val = getattr(extracted, field)
+            state_val = partial_state.get(field) if partial_state else None
+            if extracted_val and extracted_val != state_val:
+                provided_new_info = True
+                break
+
+        if not extracted.has_booking_intent and not provided_new_info:
             return None, None
 
         # 3. Merge extracted fields into partial state
@@ -80,7 +89,7 @@ class BookingService:
         # Missing or invalid fields - update partial state in Redis and prompt user
         await redis_service.save_partial_booking(session_id, merged_state)
 
-        follow_up_prompt = self._build_followup_question(missing_fields, merged_state)
+        follow_up_prompt = self._build_followup_question(missing_fields)
         return None, follow_up_prompt
 
     def _try_build_booking(
@@ -194,7 +203,7 @@ class BookingService:
         return None
 
     def _build_followup_question(
-        self, missing_fields: list[str], current_state: dict[str, Any]
+        self, missing_fields: list[str]
     ) -> str:
         prompt_parts = []
         if "name" in missing_fields:

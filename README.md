@@ -53,7 +53,7 @@ The RAG pipeline is **explicit and transparent** — retrieval, prompt construct
 | TXT extraction | Python stdlib | Zero dependency |
 | Video ingestion | **ffmpeg** + **Groq Whisper Large v3 Turbo** | Non-blocking background task |
 | LLM | **Groq** — Llama 3.3 70B / Llama 3.1 8B | Free tier; used for Q&A, query rewriting, and field extraction |
-| Embeddings | **fastembed** (`all-MiniLM-L6-v2`) | ONNX Runtime engine by Qdrant (~80 MB RAM, 5× faster) |
+| Embeddings | **Gemini `gemini-embedding-001`** (primary) / **fastembed** (fallback) | Gemini: 768-dim, free tier 1500 RPM. Fallback: local ONNX, 384-dim, zero cost |
 | Event loop | **uvloop** | Enabled automatically in Linux production containers |
 | Containerization | **Docker + Docker Compose** | Single command to start everything |
 | Linting / formatting | **Ruff** | |
@@ -69,6 +69,7 @@ Before you start, make sure you have:
 
 - **Docker Desktop** (or Docker Engine + Docker Compose v2) installed and running
 - A free **Groq API key** — get one at [console.groq.com](https://console.groq.com) (takes ~30 seconds, no credit card)
+- A free **Gemini API key** (recommended) — get one at [aistudio.google.com](https://aistudio.google.com) for higher quality embeddings. Without it, the system falls back to local fastembed.
 - `ffmpeg` on your system **only if** you want to test video uploads outside Docker (inside Docker it is already included)
 
 That is it. Python, MongoDB, Redis, and Qdrant are all managed inside Docker — you do not need to install them locally.
@@ -94,6 +95,7 @@ Open `.env` and set your Groq API key:
 
 ```env
 GROQ_API_KEY=gsk_your_key_here
+GEMINI_API_KEY=your_gemini_key_here   # optional — omit to use local fastembed
 ```
 
 All other values have working defaults for Docker Compose and do not need to be changed to get started.

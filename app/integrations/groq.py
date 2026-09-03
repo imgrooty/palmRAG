@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,7 @@ class GroqService:
         system_instruction = (
             "You are an interview booking extraction assistant. Your task is to inspect the user's message, "
             "conversation history, and current partial booking state to extract booking details.\n"
+            f"The current date is {datetime.now().strftime('%Y-%m-%d')}. Resolve relative dates (like 'tomorrow', 'next week') to absolute dates.\n"
             "Respond ONLY with a valid JSON object with the following fields:\n"
             "{\n"
             '  "has_booking_intent": bool (true if user expresses intent to schedule/book an interview/meeting),\n'

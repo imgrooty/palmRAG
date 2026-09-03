@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     qdrant_collection: str = "documents"
 
     embedding_model: str = "all-MiniLM-L6-v2"
+    gemini_api_key: str = ""
+    gemini_embedding_model: str = "gemini-embedding-001"
     groq_chat_model: str = "groq/compound"
     groq_fast_model: str = "groq/compound-mini"
     groq_whisper_model: str = "whisper-large-v3-turbo"

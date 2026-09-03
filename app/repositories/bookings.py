@@ -49,37 +49,6 @@ class BookingRepository:
         await db["bookings"].insert_one(booking)
         return booking
 
-    async def get_booking_by_id(
-        self, db: AsyncIOMotorDatabase, booking_id: uuid.UUID
-    ) -> dict[str, Any] | None:
-        """Fetch a booking by its _id.
-
-        Args:
-            db: Motor database instance.
-            booking_id: Booking _id.
-
-        Returns:
-            Booking dict or None.
-        """
-        return await db["bookings"].find_one({"_id": booking_id})
-
-    async def get_bookings_by_session_id(
-        self, db: AsyncIOMotorDatabase, session_id: str
-    ) -> list[dict[str, Any]]:
-        """Retrieve all bookings for a conversation session, newest first.
-
-        Args:
-            db: Motor database instance.
-            session_id: Redis conversation session ID.
-
-        Returns:
-            List of booking dicts ordered by created_at descending.
-        """
-        cursor = db["bookings"].find(
-            {"session_id": session_id},
-            sort=[("created_at", -1)],
-        )
-        return await cursor.to_list(length=None)
 
 
 booking_repository = BookingRepository()

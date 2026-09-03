@@ -14,14 +14,6 @@ class InterviewBooking(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-
-class PartialBookingState(BaseModel):
-    name: str | None = None
-    email: str | None = None
-    date: str | None = None
-    time: str | None = None
-
-
 class ExtractedBookingInfo(BaseModel):
     has_booking_intent: bool = Field(
         default=False,

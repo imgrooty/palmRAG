@@ -11,12 +11,22 @@ class ChunkingStrategy(str, Enum):
 
 
 class DocumentIngestResponse(BaseModel):
-    document_id: UUID
+    document_id: UUID | None = None
     filename: str
     file_type: str
     chunking_strategy: ChunkingStrategy
     chunks_created: int
     status: str
+    error_message: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentBatchIngestResponse(BaseModel):
+    documents: list[DocumentIngestResponse]
+    total: int
+    successful: int
+    failed: int
 
     model_config = ConfigDict(from_attributes=True)
 

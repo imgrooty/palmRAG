@@ -30,7 +30,7 @@ class QdrantService:
                 )
         return self._client
 
-    async def init_collection(self, vector_size: int = 384) -> None:
+    async def init_collection(self, vector_size: int) -> None:
         client = await self.get_client()
         try:
             collections = await client.get_collections()

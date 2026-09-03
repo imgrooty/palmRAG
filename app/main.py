@@ -29,18 +29,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Database init warning (may require active DB container): {e}")
 
-    try:
-        await qdrant_service.init_collection()
-    except Exception as e:
-        logger.warning(
-            f"Qdrant init warning (may require active Qdrant container): {e}"
-        )
-
-    # Pre-load the embedding model so the first live request has zero cold-start.
+    # Determine embedding backend (Gemini vs fastembed) before Qdrant init
+    # so the collection is created with the correct vector dimension.
     try:
         await embedding_warm_up()
     except Exception as e:
         logger.warning(f"Embedding warm-up warning: {e}")
+
+    from app.services.embeddings import embedding_service  # noqa: PLC0415
+
+    try:
+        await qdrant_service.init_collection(vector_size=embedding_service.vector_size)
+    except Exception as e:
+        logger.warning(
+            f"Qdrant init warning (may require active Qdrant container): {e}"
+        )
 
     yield
 
