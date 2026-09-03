@@ -38,6 +38,7 @@ def _get_model() -> Any:
         _model_instance = TextEmbedding(
             model_name=f"sentence-transformers/{settings.embedding_model}",
             max_length=512,
+            threads=1,
         )
         logger.info("fastembed model loaded successfully.")
     return _model_instance
