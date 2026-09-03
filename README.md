@@ -1,8 +1,8 @@
-﻿# Palm Mind RAG
+# Palm Mind RAG
 
-**A production-ready Retrieval-Augmented Generation (RAG) backend** that lets you upload documents or videos, ask natural-language questions about them in a chat session, and book interviews — all from a single conversational API.
+**A high-performance, production-ready Retrieval-Augmented Generation (RAG) backend** that lets you upload documents or videos, ask natural-language questions about them in a chat session, and book interviews — all from a single conversational API.
 
-Built with a **completely free-tier stack**: no OpenAI billing, no Pinecone subscription, no hidden costs.
+Built with a **completely free-tier stack**: no OpenAI billing, no Pinecone subscription, no hidden costs. Optimized for ultra-low memory footprint (~80 MB embedding RAM vs 600 MB PyTorch) and high throughput using Rust-backed components (`granian`, `orjson`, `fastembed`, `uvloop`).
 
 ---
 
@@ -12,9 +12,9 @@ Palm Mind RAG is a FastAPI service with three core capabilities that work togeth
 
 | Capability | What happens |
 |---|---|
-| **Document Ingestion** | Upload a PDF, TXT, or video file. The system chunks the text, generates local embeddings, and stores them in a vector database ready for retrieval. Videos are transcribed automatically via Groq Whisper in the background — the upload returns immediately. |
-| **Conversational Q&A** | Send a message referencing your uploaded content. The system rewrites your query, retrieves the most relevant chunks, builds a grounded prompt, and returns an answer with source citations. Conversation history is kept per session via Redis. |
-| **Interview Booking** | Within the same chat session, say something like *"Book me next Friday at 3pm, I am Bikram, email me at bikram@example.com."* The system extracts the structured fields, asks follow-up questions for anything missing, and persists a confirmed booking to the database. |
+| **Document Ingestion** | Upload a PDF, TXT, or video file. The system chunks the text using selectable strategies (`fixed` or `recursive`), generates local ONNX embeddings via `fastembed`, and stores them in Qdrant. Videos are transcribed automatically via Groq Whisper in the background — the upload returns immediately. |
+| **Conversational Q&A** | Send a message referencing your uploaded content. The system rewrites your query, retrieves the most relevant chunks from Qdrant, builds a grounded prompt, and returns an answer with source citations. Conversation history is kept per session via Redis using `orjson`. |
+| **Interview Booking** | Within the same chat session, say something like *"Book me next Friday at 3pm, I am Bikram, email me at bikram@example.com."* The system extracts structured fields via Groq LLM, asks follow-up questions for anything missing, and persists a confirmed booking to MongoDB. |
 
 ---
 
@@ -24,15 +24,15 @@ Palm Mind RAG is a FastAPI service with three core capabilities that work togeth
 User
  │
  ▼
-FastAPI (port 8000)
+Granian / FastAPI (port 8000)
  ├── POST /api/v1/documents/ingest   ← upload files
  ├── GET  /api/v1/documents/{id}     ← check ingestion status
  ├── POST /api/v1/chat               ← Q&A + booking in one endpoint
  └── GET  /health                    ← service health check
  │
- ├── PostgreSQL  — document records, booking records
- ├── Redis       — per-session conversation history
- └── Qdrant      — vector index for chunk retrieval
+ ├── MongoDB (Motor) — document records, chunk audit, booking records
+ ├── Redis           — per-session conversation history
+ └── Qdrant          — vector index for chunk retrieval
 ```
 
 The RAG pipeline is **explicit and transparent** — retrieval, prompt construction, and generation are separate steps in the code. No LangChain abstraction wrappers.
@@ -43,21 +43,23 @@ The RAG pipeline is **explicit and transparent** — retrieval, prompt construct
 
 | Layer | Tool | Notes |
 |---|---|---|
-| API framework | **FastAPI** | Async, auto-generates `/docs` and `/redoc` |
+| API server | **Granian** | Rust-backed high-throughput ASGI server |
+| Framework | **FastAPI** | Async framework, auto-generates `/docs` and `/redoc` |
 | Validation | **Pydantic v2** | All request/response bodies are typed models |
-| Relational DB | **PostgreSQL 15** + SQLAlchemy (async) | Documents and bookings |
-| Session memory | **Redis 7** | Sliding conversation history per `session_id` |
+| Database | **MongoDB** + **Motor** | Async-native NoSQL storage for documents & bookings |
+| Session memory | **Redis 7** + **orjson** | Sliding conversation history per `session_id` |
 | Vector DB | **Qdrant** (self-hosted via Docker) | Stores chunk embeddings for retrieval |
-| PDF extraction | **PyMuPDF** | Fast, no external service needed |
+| PDF extraction | **pypdfium2** | Google PDFium engine — fast, low memory |
 | TXT extraction | Python stdlib | Zero dependency |
 | Video ingestion | **ffmpeg** + **Groq Whisper Large v3 Turbo** | Non-blocking background task |
 | LLM | **Groq** — Llama 3.3 70B / Llama 3.1 8B | Free tier; used for Q&A, query rewriting, and field extraction |
-| Embeddings | **sentence-transformers** (`all-MiniLM-L6-v2`) | Local model, no API calls |
+| Embeddings | **fastembed** (`all-MiniLM-L6-v2`) | ONNX Runtime engine by Qdrant (~80 MB RAM, 5× faster) |
+| Event loop | **uvloop** | Enabled automatically in Linux production containers |
 | Containerization | **Docker + Docker Compose** | Single command to start everything |
 | Linting / formatting | **Ruff** | |
 | Testing | **pytest** | |
 
-**Running cost: $0** — every external API used has a free tier sufficient for development and moderate production load.
+**Running cost: $0** — every external API used has a free tier sufficient for development and production load.
 
 ---
 
@@ -69,7 +71,7 @@ Before you start, make sure you have:
 - A free **Groq API key** — get one at [console.groq.com](https://console.groq.com) (takes ~30 seconds, no credit card)
 - `ffmpeg` on your system **only if** you want to test video uploads outside Docker (inside Docker it is already included)
 
-That is it. Python, Postgres, Redis, and Qdrant are all managed inside Docker — you do not need to install them locally.
+That is it. Python, MongoDB, Redis, and Qdrant are all managed inside Docker — you do not need to install them locally.
 
 ---
 
@@ -96,15 +98,22 @@ GROQ_API_KEY=gsk_your_key_here
 
 All other values have working defaults for Docker Compose and do not need to be changed to get started.
 
-### 3. Start all services
+### 3. Start all services via Docker Compose
 
 ```bash
 docker-compose up --build
 ```
 
-This starts four containers: the FastAPI app, PostgreSQL, Redis, and Qdrant. The first run takes a few minutes to build the image and download the embedding model.
+This starts four containers: the FastAPI app (running on Granian), MongoDB, Redis, and Qdrant.
 
-### 4. Verify everything is running
+### 4. Or run locally on Windows (Development)
+
+```bash
+pip install -r requirements.txt
+python -m granian --interface asgi app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 5. Verify service health
 
 ```bash
 curl http://localhost:8000/health
@@ -115,13 +124,13 @@ Expected response (all three backing services must be `"connected"`):
 ```json
 {
   "status": "ok",
-  "postgres": "connected",
+  "mongodb": "connected",
   "redis": "connected",
   "qdrant": "connected"
 }
 ```
 
-### 5. Open the interactive API docs
+### 6. Open the interactive API docs
 
 Navigate to **http://localhost:8000/docs** in your browser. Every endpoint is documented there with a live "Try it out" interface.
 
@@ -134,18 +143,17 @@ Copy `.env.example` to `.env` and fill in the values marked **Required**.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GROQ_API_KEY` | **Yes** | — | API key from console.groq.com |
-| `DATABASE_URL` | No | set by Docker Compose | SQLAlchemy async connection string for PostgreSQL |
-| `REDIS_URL` | No | set by Docker Compose | Redis connection string |
-| `QDRANT_URL` | No | set by Docker Compose | Qdrant HTTP endpoint |
+| `MONGODB_URL` | No | `mongodb://localhost:27017` | MongoDB connection URI |
+| `MONGODB_DB_NAME` | No | `palmmind` | MongoDB database name |
+| `REDIS_URL` | No | `redis://localhost:6379/0` | Redis connection string |
+| `QDRANT_URL` | No | `http://localhost:6333` | Qdrant HTTP endpoint |
 | `QDRANT_COLLECTION` | No | `documents` | Vector collection name |
-| `EMBEDDING_MODEL` | No | `all-MiniLM-L6-v2` | Local sentence-transformers model |
-| `GROQ_CHAT_MODEL` | No | `llama-3.3-70b-versatile` | Main answer generation model |
-| `GROQ_FAST_MODEL` | No | `llama-3.1-8b-instant` | Used for query rewriting and field extraction |
+| `EMBEDDING_MODEL` | No | `all-MiniLM-L6-v2` | Fastembed model name |
+| `GROQ_CHAT_MODEL` | No | `groq/compound` | Main answer generation model |
+| `GROQ_FAST_MODEL` | No | `groq/compound-mini` | Used for query rewriting and field extraction |
 | `GROQ_WHISPER_MODEL` | No | `whisper-large-v3-turbo` | Transcription model for video/audio |
 | `MAX_UPLOAD_MB` | No | `50` | Max upload file size in megabytes |
 | `ENV` | No | `development` | `development` or `production` |
-
-> When running via `docker-compose up`, `DATABASE_URL`, `REDIS_URL`, and `QDRANT_URL` are pre-wired between containers. You only need to set `GROQ_API_KEY`.
 
 ---
 
@@ -161,7 +169,7 @@ curl -X POST http://localhost:8000/api/v1/documents/ingest \
   -F "chunking_strategy=recursive"
 ```
 
-Available chunking strategies: `recursive` (recommended), `fixed`, `sentence`.
+Available chunking strategies: `recursive` (recommended), `fixed`.
 
 **Response:**
 ```json
@@ -182,7 +190,7 @@ For video files (`.mp4`, `.mov`, etc.), transcription runs in the background. Th
 ```bash
 curl -X POST http://localhost:8000/api/v1/documents/ingest \
   -F "file=@/path/to/interview.mp4" \
-  -F "chunking_strategy=sentence"
+  -F "chunking_strategy=recursive"
 ```
 
 Poll the status until it reads `"completed"`:
@@ -237,13 +245,12 @@ curl -X POST http://localhost:8000/api/v1/chat \
     "id": "f9e8d7c6-...",
     "name": "Bikram",
     "email": "bikram@example.com",
-    "scheduled_at": "2026-09-07T10:00:00",
+    "date": "2026-09-07",
+    "time": "10:00:00",
     "status": "confirmed"
   }
 }
 ```
-
-If any required field is missing (name, email, date, or time), the system will ask a follow-up question in the same conversation before confirming.
 
 ---
 
@@ -257,10 +264,10 @@ pytest -v
 ruff check .
 
 # Check formatting
-ruff format --check .
+ruff format .
 ```
 
-Unit tests mock all external calls (Groq, Qdrant, Redis, PostgreSQL), so you can run `pytest` without any services running locally.
+Unit tests mock external connections, so you can run `pytest` without any services running locally.
 
 ---
 
@@ -271,49 +278,25 @@ palmRAG/
 ├── app/
 │   ├── api/v1/          # FastAPI route handlers (documents, chat)
 │   ├── core/            # Config (Pydantic Settings), logging
-│   ├── db/              # SQLAlchemy engine and session factory
+│   ├── db/              # Motor (MongoDB) client and index setup
 │   ├── integrations/    # Groq, Qdrant, Redis client wrappers
-│   ├── models/          # SQLAlchemy ORM models
 │   ├── repositories/    # All database access (no raw queries in routes)
 │   ├── schemas/         # Pydantic v2 request/response models
-│   ├── services/        # Business logic: ingestion, RAG, booking, chunking
-│   └── main.py          # FastAPI app factory and health check
+│   ├── services/        # Business logic: ingestion, RAG, booking, chunking, embeddings
+│   └── main.py          # FastAPI app factory, lifespan, and health check
 ├── tests/               # pytest test suite
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-└── .env.example
+└── .env
 ```
-
----
-
-## Common issues
-
-**`GROQ_API_KEY` not set — app refuses to start**
-Set the key in your `.env` file before running `docker-compose up`.
-
-**Health check shows `"qdrant": "disconnected"`**
-Qdrant takes a few seconds longer to become ready. Wait 10–15 seconds and retry. If it persists, run `docker-compose logs qdrant` to inspect.
-
-**Video upload stays at `processing` indefinitely**
-Verify ffmpeg is available inside the container:
-```bash
-docker exec palmmind_api ffmpeg -version
-```
-If it is missing, rebuild the image with `docker-compose up --build`.
-
-**`413 Request Entity Too Large` on upload**
-Increase `MAX_UPLOAD_MB` in your `.env` file and restart the service.
-
-**Embedding model downloads on every container restart**
-This is expected on the first cold start only. Subsequent starts use the cached model from the container layer.
 
 ---
 
 ## Stopping the services
 
 ```bash
-# Stop containers, keep all data volumes (documents, bookings, vectors)
+# Stop containers, keep data volumes
 docker-compose down
 
 # Stop containers and delete all data permanently
