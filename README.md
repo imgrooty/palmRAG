@@ -26,7 +26,6 @@ User
  ▼
 Granian / FastAPI (port 8000)
  ├── POST /api/v1/documents/ingest   ← upload files
- ├── GET  /api/v1/documents/{id}     ← check ingestion status
  ├── POST /api/v1/chat               ← Q&A + booking in one endpoint
  └── GET  /health                    ← service health check
  │
@@ -195,12 +194,6 @@ curl -X POST http://localhost:8000/api/v1/documents/ingest \
   -F "chunking_strategy=recursive"
 ```
 
-Poll the status until it reads `"completed"`:
-
-```bash
-curl http://localhost:8000/api/v1/documents/{document_id}
-```
-
 ### Ask a question
 
 Use any `session_id` string to start a conversation. Re-use the same `session_id` in follow-up messages to maintain context.
@@ -227,7 +220,7 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ### Book an interview
 
-No special endpoint — just say it in plain English within the same chat session:
+No special endpoint — just say it in plain English within the same chat session. The system understands relative dates (like "tomorrow" or "next Monday") and seamlessly switches between booking mode and general Q&A. You can ask a document question in the middle of a booking, and it will answer without losing your booking progress!
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/chat \
