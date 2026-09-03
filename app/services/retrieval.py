@@ -22,8 +22,8 @@ class RetrievalService:
         if not query.strip():
             return []
 
-        # 1. Embed query
-        query_vector = embedding_service.embed_text(query)
+        # 1. Embed query (async — dispatched to thread pool)
+        query_vector = await embedding_service.embed_text(query)
 
         # 2. Search Qdrant
         scored_points = await qdrant_service.search(

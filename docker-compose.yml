@@ -10,7 +10,8 @@ services:
       - "8000:8000"
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/palmmind
+      - MONGODB_URL=mongodb://mongo:27017
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME:-palmmind}
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_COLLECTION=${QDRANT_COLLECTION:-documents}
@@ -21,7 +22,7 @@ services:
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-50}
       - ENV=production
     depends_on:
-      postgres:
+      mongo:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -29,19 +30,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  postgres:
-    image: postgres:15-alpine
-    container_name: palmmind_postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: palmmind
+  mongo:
+    image: mongo:7-jammy
+    container_name: palmmind_mongo
     ports:
-      - "5432:5432"
+      - "27017:27017"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mongo_data:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d palmmind"]
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -77,6 +74,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres_data:
+  mongo_data:
   redis_data:
   qdrant_data:

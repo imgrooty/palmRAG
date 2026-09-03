@@ -141,7 +141,14 @@ class ChunkingService:
             next_seps = seps[1:]
 
             if sep == "":
-                splits = list(txt)
+                # Direct stride over raw text — avoids O(n²) list-of-chars join.
+                stride = target_size - overlap if target_size > overlap else target_size
+                res = []
+                for i in range(0, len(txt), stride):
+                    part = txt[i : i + target_size]
+                    if part.strip():
+                        res.append(part)
+                return res
             else:
                 splits = txt.split(sep)
 

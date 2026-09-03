@@ -13,10 +13,11 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.core.config import settings
 from app.core.logging import logger
-from app.db.database import get_db
+from app.db.mongo import get_db
 from app.repositories.documents import document_repository
 from app.schemas.document import (
     ChunkingStrategy,
@@ -35,7 +36,7 @@ async def ingest_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     chunking_strategy: ChunkingStrategy = Form(...),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> DocumentIngestResponse:
     if not file.filename:
         raise HTTPException(
@@ -43,10 +44,33 @@ async def ingest_document(
             detail="Uploaded file must have a valid filename.",
         )
 
-    # Read content bytes to validate size
+    # --- Fast-path size check (no body read required) ---
+    # UploadFile.size is populated by FastAPI from the Content-Length header
+    # or the spooled temp-file size before any read.  If present, reject
+    # oversized files immediately so we never load them into memory.
+    if file.size is not None and file.size > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"File size ({file.size} bytes) exceeds limit of "
+                f"{settings.max_upload_mb} MB."
+            ),
+        )
+
+    # Validate extension before reading (cheap).
+    try:
+        file_type = ingestion_service.validate_file(file.filename, 0)
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve),
+        ) from ve
+
+    # Read body only after both checks pass.
     content_bytes = await file.read()
     file_size = len(content_bytes)
 
+    # Re-validate with actual byte count (Content-Length can be absent or spoofed).
     try:
         file_type = ingestion_service.validate_file(file.filename, file_size)
     except ValueError as ve:
@@ -81,16 +105,16 @@ async def ingest_document(
         # 3. Add background task
         background_tasks.add_task(
             ingestion_service.process_video_background,
-            document_id=doc.id,
+            document_id=doc["_id"],
             filename=file.filename,
             temp_video_path=temp_path,
             chunking_strategy=chunking_strategy,
         )
 
         return DocumentIngestResponse(
-            document_id=doc.id,
-            filename=doc.filename,
-            file_type=doc.file_type,
+            document_id=doc["_id"],
+            filename=doc["filename"],
+            file_type=doc["file_type"],
             chunking_strategy=chunking_strategy,
             chunks_created=0,
             status="processing",
@@ -129,7 +153,7 @@ async def ingest_document(
 )
 async def get_document_status(
     document_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> DocumentStatusResponse:
     doc = await document_repository.get_document_by_id(db, document_id)
     if doc is None:
@@ -138,4 +162,12 @@ async def get_document_status(
             detail=f"Document with ID {document_id} not found.",
         )
 
-    return DocumentStatusResponse.model_validate(doc)
+    return DocumentStatusResponse(
+        document_id=doc["_id"],
+        filename=doc["filename"],
+        file_type=doc["file_type"],
+        chunking_strategy=ChunkingStrategy(doc["chunking_strategy"]),
+        chunks_created=doc.get("chunk_count", 0),
+        status=doc["status"],
+        created_at=doc["created_at"],
+    )

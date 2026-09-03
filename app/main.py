@@ -1,21 +1,31 @@
 from contextlib import asynccontextmanager
+import sys
 from typing import Any
 
 from fastapi import FastAPI, Response, status
-from sqlalchemy import text
+
+if sys.platform != "win32":
+    try:
+        import uvloop
+
+        uvloop.install()
+    except ImportError:
+        pass
 
 from app.api.v1.router import api_v1_router
+from app.core.config import settings
 from app.core.logging import logger
-from app.db.database import engine, init_db
+from app.db.mongo import get_motor_client, init_collections
 from app.integrations.qdrant import qdrant_service
 from app.integrations.redis import redis_service
+from app.services.embeddings import warm_up as embedding_warm_up
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up Palm Mind RAG application...")
     try:
-        await init_db()
+        await init_collections()
     except Exception as e:
         logger.warning(f"Database init warning (may require active DB container): {e}")
 
@@ -26,11 +36,24 @@ async def lifespan(app: FastAPI):
             f"Qdrant init warning (may require active Qdrant container): {e}"
         )
 
+    # Pre-load the embedding model so the first live request has zero cold-start.
+    try:
+        await embedding_warm_up()
+    except Exception as e:
+        logger.warning(f"Embedding warm-up warning: {e}")
+
     yield
 
     logger.info("Shutting down Palm Mind RAG application...")
     await redis_service.close()
-    await engine.dispose()
+    try:
+        await qdrant_service.close()
+    except Exception as e:
+        logger.warning(f"Qdrant close warning: {e}")
+    try:
+        get_motor_client().close()
+    except Exception as e:
+        logger.warning(f"MongoDB client close warning: {e}")
 
 
 app = FastAPI(
@@ -47,19 +70,19 @@ app.include_router(api_v1_router)
 
 @app.get("/health", tags=["health"])
 async def health_check(response: Response) -> dict[str, Any]:
-    postgres_status = "disconnected"
+    mongo_status = "disconnected"
     redis_status = "disconnected"
     qdrant_status = "disconnected"
     is_healthy = True
 
-    # 1. Test Postgres
+    # 1. Test MongoDB
     try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-            postgres_status = "connected"
+        client = get_motor_client()
+        await client[settings.mongodb_db_name].command("ping")
+        mongo_status = "connected"
     except Exception as e:
         logger.warning(
-            f"Postgres health check failed [{type(e).__name__}]: {e}",
+            f"MongoDB health check failed [{type(e).__name__}]: {e}",
             exc_info=True,
         )
         is_healthy = False
@@ -89,7 +112,7 @@ async def health_check(response: Response) -> dict[str, Any]:
 
     return {
         "status": "ok" if is_healthy else "error",
-        "postgres": postgres_status,
+        "mongodb": mongo_status,
         "redis": redis_status,
         "qdrant": qdrant_status,
     }

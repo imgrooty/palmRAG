@@ -3,7 +3,7 @@ import re
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.logging import logger
 from app.integrations.groq import groq_service
@@ -15,7 +15,7 @@ from app.schemas.booking import ExtractedBookingInfo, InterviewBooking
 class BookingService:
     async def process_booking_turn(
         self,
-        db_session: AsyncSession,
+        db_session: AsyncIOMotorDatabase,
         session_id: str,
         message: str,
         history: list[dict[str, str]],
@@ -50,7 +50,7 @@ class BookingService:
         if try_booking is not None:
             # Full validation success! Persist to DB and clear Redis partial state
             db_booking = await booking_repository.create_booking(
-                session=db_session,
+                db=db_session,
                 session_id=session_id,
                 name=try_booking.name,
                 email=try_booking.email,
@@ -61,12 +61,12 @@ class BookingService:
             await redis_service.clear_partial_booking(session_id)
 
             confirmed_booking = InterviewBooking(
-                id=db_booking.id,
-                name=db_booking.name,
-                email=db_booking.email,  # type: ignore[arg-type]
-                date=db_booking.interview_date,
-                time=db_booking.interview_time,
-                status=db_booking.status,
+                id=db_booking["_id"],
+                name=db_booking["name"],
+                email=db_booking["email"],  # type: ignore[arg-type]
+                date=try_booking.date,
+                time=try_booking.time,
+                status=db_booking.get("status", "confirmed"),
             )
 
             date_str = confirmed_booking.date.strftime("%B %d, %Y")

@@ -1,4 +1,4 @@
-import json
+import orjson
 from typing import Any
 
 from redis.asyncio import Redis
@@ -24,7 +24,7 @@ class RedisService:
         if not data:
             return []
         try:
-            return json.loads(data)
+            return orjson.loads(data)
         except Exception as e:
             logger.error(
                 f"Error parsing conversation history for session {session_id}: {e}"
@@ -38,17 +38,36 @@ class RedisService:
         assistant_answer: str,
         ttl: int = 86400,
     ) -> None:
+        """Persist a completed conversation turn.
+
+        Uses a pipeline to batch the GET + SET into a single network round-trip.
+        """
         client = self.get_client()
         key = f"conversation:{session_id}"
-        history = await self.get_history(session_id)
+
+        async with client.pipeline(transaction=False) as pipe:
+            pipe.get(key)
+            (existing_raw,) = await pipe.execute()
+
+        history: list[dict[str, str]] = []
+        if existing_raw:
+            try:
+                history = orjson.loads(existing_raw)
+            except Exception as e:
+                logger.error(
+                    "Error parsing conversation history for session %s: %s",
+                    session_id,
+                    e,
+                )
+
         history.append({"role": "user", "content": user_message})
         history.append({"role": "assistant", "content": assistant_answer})
 
-        # Keep last 20 turns max to avoid ballooning memory
+        # Keep last 20 turns max (40 messages) to avoid ballooning memory.
         if len(history) > 40:
             history = history[-40:]
 
-        await client.set(key, json.dumps(history), ex=ttl)
+        await client.set(key, orjson.dumps(history).decode(), ex=ttl)
 
     async def get_partial_booking(self, session_id: str) -> dict[str, Any]:
         client = self.get_client()
@@ -57,7 +76,7 @@ class RedisService:
         if not data:
             return {}
         try:
-            return json.loads(data)
+            return orjson.loads(data)
         except Exception as e:
             logger.error(f"Error parsing partial booking for session {session_id}: {e}")
             return {}
@@ -67,7 +86,7 @@ class RedisService:
     ) -> None:
         client = self.get_client()
         key = f"booking:{session_id}"
-        await client.set(key, json.dumps(partial_data), ex=ttl)
+        await client.set(key, orjson.dumps(partial_data).decode(), ex=ttl)
 
     async def clear_partial_booking(self, session_id: str) -> None:
         client = self.get_client()

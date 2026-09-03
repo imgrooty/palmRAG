@@ -3,23 +3,27 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-from app.models.base import Base
 
 
 @pytest_asyncio.fixture
-async def async_session() -> AsyncGenerator[AsyncSession, None]:
-    # In-memory SQLite for testing DB models and repositories
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def async_session() -> AsyncGenerator[MagicMock, None]:
+    """Mock Motor database for unit tests."""
+    mock_db = MagicMock()
 
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with session_factory() as session:
-        yield session
+    # Default mock responses for document operations
+    mock_db["documents"].insert_one = AsyncMock()
+    mock_db["documents"].find_one_and_update = AsyncMock(
+        return_value={"_id": "test_id", "status": "completed"}
+    )
+    mock_db["documents"].find_one = AsyncMock(return_value=None)
 
-    await engine.dispose()
+    # Default mock responses for chunk operations
+    mock_db["chunks"].insert_many = AsyncMock()
+
+    # Default mock responses for booking operations
+    mock_db["bookings"].insert_one = AsyncMock()
+
+    yield mock_db
 
 
 @pytest.fixture

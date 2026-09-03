@@ -37,9 +37,7 @@ class QdrantService:
             collection_names = [c.name for c in collections.collections]
 
             if self.collection_name not in collection_names:
-                logger.info(
-                    f"Creating Qdrant collection '{self.collection_name}'..."
-                )
+                logger.info(f"Creating Qdrant collection '{self.collection_name}'...")
                 await client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=models.VectorParams(
@@ -47,9 +45,7 @@ class QdrantService:
                         distance=models.Distance.COSINE,
                     ),
                 )
-                logger.info(
-                    f"Qdrant collection '{self.collection_name}' created."
-                )
+                logger.info(f"Qdrant collection '{self.collection_name}' created.")
             else:
                 logger.info(
                     f"Qdrant collection '{self.collection_name}' already exists."
@@ -66,39 +62,48 @@ class QdrantService:
         vectors: list[list[float]] | None = None,
         payloads: list[dict[str, Any]] | None = None,
     ) -> None:
+        """Upsert a batch of vector points into the collection.
+
+        Accepts either a pre-built ``points`` list or the three parallel
+        sequences ``chunk_ids``, ``vectors``, ``payloads``.  Builds
+        PointStruct objects in a single pass to minimise peak memory.
+        """
         client = await self.get_client()
         try:
-            if points is None:
-                points = []
-                if chunk_ids and vectors and payloads:
-                    for cid, vec, pl in zip(
-                        chunk_ids, vectors, payloads, strict=True
-                    ):
-                        points.append(
-                            {
-                                "id": str(cid),
-                                "vector": vec,
-                                "payload": pl,
-                            }
-                        )
+            if points is not None:
+                qdrant_points = [
+                    models.PointStruct(
+                        id=str(pt["id"]),
+                        vector=pt["vector"],
+                        payload=pt["payload"],
+                    )
+                    for pt in points
+                ]
+            elif chunk_ids and vectors and payloads:
+                # Single-pass construction — no intermediate ``points`` list.
+                qdrant_points = [
+                    models.PointStruct(
+                        id=str(cid),
+                        vector=vec,
+                        payload=pl,
+                    )
+                    for cid, vec, pl in zip(chunk_ids, vectors, payloads, strict=True)
+                ]
+            else:
+                qdrant_points = []
 
-            qdrant_points = [
-                models.PointStruct(
-                    id=str(pt["id"]),
-                    vector=pt["vector"],
-                    payload=pt["payload"],
-                )
-                for pt in points
-            ]
+            if not qdrant_points:
+                return
+
             await client.upsert(
                 collection_name=self.collection_name,
                 points=qdrant_points,
             )
             logger.info(
-                f"Successfully upserted {len(qdrant_points)} points to Qdrant."
+                "Successfully upserted %d points to Qdrant.", len(qdrant_points)
             )
         except Exception as e:
-            logger.error(f"Failed to upsert points to Qdrant: {e}")
+            logger.error("Failed to upsert points to Qdrant: %s", e)
             raise
 
     async def search(
@@ -142,10 +147,16 @@ class QdrantService:
             await client.get_collections()
             return True
         except Exception as e:
-            logger.warning(f"Qdrant health check failed: {e}")
+            logger.warning("Qdrant health check failed: %s", e)
             return False
 
     is_healthy = health_check
+
+    async def close(self) -> None:
+        """Close the underlying async Qdrant client and release connections."""
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
 
 qdrant_service = QdrantService()

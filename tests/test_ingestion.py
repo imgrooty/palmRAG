@@ -42,6 +42,7 @@ async def test_ingest_sync_document(async_session):
         ) as mock_qdrant,
         patch(
             "app.services.ingestion.embedding_service.embed_texts",
+            new_callable=AsyncMock,
             return_value=[[0.1] * 384],
         ),
     ):

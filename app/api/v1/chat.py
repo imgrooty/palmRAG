@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.logging import logger
-from app.db.database import get_db
+from app.db.mongo import get_db
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.booking import booking_service
 from app.services.chat_memory import chat_memory_service
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post("", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def chat_turn(
     request: ChatRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> ChatResponse:
     try:
         session_id = request.session_id
